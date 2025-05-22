@@ -58,15 +58,26 @@ class FrozenBatchNorm2d(torch.nn.Module):
 class BackboneBase(nn.Module):
 
     def __init__(self, backbone: nn.Module, train_backbone: bool, num_channels: int, return_interm_layers: bool):
+        """
+        Args:
+            backbone: 预训练的骨干网络
+            train_backbone: 是否训练骨干网络的权重
+            num_channels: 骨干网络最终输出特征的通道数
+            return_interm_layers: 是否返回中间层的特征
+        """
         super().__init__()
+        # 减少计算量，防止浅层特征被破坏
         for name, parameter in backbone.named_parameters():
+            # 若 train_backbone==False 冻结所有参数, 若 train_backbone=True, 仅训练 layer2、layer3、layer4 的参数
             if not train_backbone or 'layer2' not in name and 'layer3' not in name and 'layer4' not in name:
                 parameter.requires_grad_(False)
         if return_interm_layers:
             return_layers = {"layer1": "0", "layer2": "1", "layer3": "2", "layer4": "3"}
         else:
             return_layers = {'layer4': "0"}
+        # 用于从骨干网络中提取指定层的输出
         self.body = IntermediateLayerGetter(backbone, return_layers=return_layers)
+        # 记录输出特征的通道数
         self.num_channels = num_channels
 
     def forward(self, tensor_list: NestedTensor):
@@ -75,6 +86,7 @@ class BackboneBase(nn.Module):
         for name, x in xs.items():
             m = tensor_list.mask
             assert m is not None
+            # 不同层（如 layer1 到 layer4）的特征图分辨率不同，需将原始掩码匹配到当前层分辨率。
             mask = F.interpolate(m[None].float(), size=x.shape[-2:]).to(torch.bool)[0]
             out[name] = NestedTensor(x, mask)
         return out
@@ -86,10 +98,14 @@ class Backbone(BackboneBase):
                  train_backbone: bool,
                  return_interm_layers: bool,
                  dilation: bool):
+        # 获取 backbone 默认 name='resnet50'
+        # replace_stride_with_dilation: 设置最后一层为空洞卷积, 平衡分辨率与感受野, 适应不同任务需求
+        # FrozenBatchNorm2d: BN层的均值和方差在训练时不更新, 仅使用预训练时的统计量
         backbone = getattr(torchvision.models, name)(
             replace_stride_with_dilation=[False, False, dilation],
             pretrained=is_main_process(), norm_layer=FrozenBatchNorm2d)
         num_channels = 512 if name in ('resnet18', 'resnet34') else 2048
+        # 初始化 BackboneBase
         super().__init__(backbone, train_backbone, num_channels, return_interm_layers)
 
 
@@ -98,13 +114,13 @@ class Joiner(nn.Sequential):
         super().__init__(backbone, position_embedding)
 
     def forward(self, tensor_list: NestedTensor):
-        xs = self[0](tensor_list)
+        xs = self[0](tensor_list) # 生成特征图
         out: List[NestedTensor] = []
         pos = []
         for name, x in xs.items():
             out.append(x)
             # position encoding
-            pos.append(self[1](x).to(x.tensors.dtype))
+            pos.append(self[1](x).to(x.tensors.dtype)) # 生成位置编码并转换为特征图的数据类型
 
         return out, pos
 
