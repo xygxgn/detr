@@ -21,6 +21,18 @@ class Transformer(nn.Module):
                  num_decoder_layers=6, dim_feedforward=2048, dropout=0.1,
                  activation="relu", normalize_before=False,
                  return_intermediate_dec=False):
+        """
+        Args:
+            d_model: 模型的特征维度 dimension of model
+            nhead: 多头注意力 (Multi-Head Attention) 的头数(默认 8)
+            num_encoder_layers: 编码器层数
+            num_decoder_layers: 解码器层数
+            dim_feedforward: 前馈网络 FFN 的隐藏层纬度
+            dropout: 暂退法参数
+            activation: 激活函数
+            normalize_before: 是否在 LayerNorm 之前 进行残差连接
+            return_intermediate_dec: 是否返回解码器所有层的输出（用于多阶段预测）
+        """
         super().__init__()
 
         encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward,
@@ -40,18 +52,32 @@ class Transformer(nn.Module):
         self.nhead = nhead
 
     def _reset_parameters(self):
+        # 对所有参数进行初始化
         for p in self.parameters():
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
     def forward(self, src, mask, query_embed, pos_embed):
+        """
+        Args:
+            src: 输入的特征图
+            mask: 掩码
+            query_embed: 查询向量
+            pos_embed: 位置编码
+        """
+        # 1. 将 backbone 得到的图片特征展平转化为 transformer 能够接受的形式
         # flatten NxCxHxW to HWxNxC
-        bs, c, h, w = src.shape
+        bs, c, h, w = src.shape # [BatchSize, Channels, Height, Width]
+        # [N, C, H, W] ==> [N, C, H*W] ==> [H*W, N, C]
         src = src.flatten(2).permute(2, 0, 1)
+        # [N, C, H, W] ==> [N, C, H*W] ==> [H*W, N, C]
         pos_embed = pos_embed.flatten(2).permute(2, 0, 1)
+        # [num_queries, d_model] ==> [num_queries, 1, d_model] ==> [num_queries, N, d_model]
         query_embed = query_embed.unsqueeze(1).repeat(1, bs, 1)
+        # NxHxW to NxHW
         mask = mask.flatten(1)
 
+        # 2. 将转化好的数据传入编码-解码器 TODO read
         tgt = torch.zeros_like(query_embed)
         memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed)
         hs = self.decoder(tgt, memory, memory_key_padding_mask=mask,
@@ -62,6 +88,11 @@ class Transformer(nn.Module):
 class TransformerEncoder(nn.Module):
 
     def __init__(self, encoder_layer, num_layers, norm=None):
+        """
+        Args:
+            encoder_layer: TransformerEncoderLayer
+            num_layers: 编码器层数
+        """
         super().__init__()
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
@@ -128,6 +159,15 @@ class TransformerEncoderLayer(nn.Module):
 
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1,
                  activation="relu", normalize_before=False):
+        """
+        Args:
+            d_model: 模型的特征维度 dimension of model
+            nhead: 多头注意力 (Multi-Head Attention) 的头数(默认 8)
+            dim_feedforward: 前馈网络 FFN 的隐藏层纬度
+            dropout: 暂退法参数
+            activation: 激活函数
+            normalize_before: 是否在 LayerNorm 之前 进行残差连接
+        """
         super().__init__()
         self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
         # Implementation of Feedforward model
@@ -151,12 +191,17 @@ class TransformerEncoderLayer(nn.Module):
                      src_mask: Optional[Tensor] = None,
                      src_key_padding_mask: Optional[Tensor] = None,
                      pos: Optional[Tensor] = None):
+        # Positional Encoding
         q = k = self.with_pos_embed(src, pos)
+        # Multi-Head Self Attention
         src2 = self.self_attn(q, k, value=src, attn_mask=src_mask,
                               key_padding_mask=src_key_padding_mask)[0]
+        # Add & Norm
         src = src + self.dropout1(src2)
         src = self.norm1(src)
+        # Feed Forward
         src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
+        # Add & Norm
         src = src + self.dropout2(src2)
         src = self.norm2(src)
         return src
@@ -165,13 +210,19 @@ class TransformerEncoderLayer(nn.Module):
                     src_mask: Optional[Tensor] = None,
                     src_key_padding_mask: Optional[Tensor] = None,
                     pos: Optional[Tensor] = None):
+        # Norm
         src2 = self.norm1(src)
+        # Positional Encoding
         q = k = self.with_pos_embed(src2, pos)
+        # Multi-Head Self Attention
         src2 = self.self_attn(q, k, value=src2, attn_mask=src_mask,
                               key_padding_mask=src_key_padding_mask)[0]
+        # Add & Norm
         src = src + self.dropout1(src2)
+        # Feed Forward
         src2 = self.norm2(src)
         src2 = self.linear2(self.dropout(self.activation(self.linear1(src2))))
+        # Add
         src = src + self.dropout2(src2)
         return src
 
@@ -188,6 +239,15 @@ class TransformerDecoderLayer(nn.Module):
 
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1,
                  activation="relu", normalize_before=False):
+        """
+        Args:
+            d_model: 模型的特征维度 dimension of model
+            nhead: 多头注意力 (Multi-Head Attention) 的头数(默认 8)
+            dim_feedforward: 前馈网络 FFN 的隐藏层纬度
+            dropout: 暂退法参数
+            activation: 激活函数
+            normalize_before: 是否在 LayerNorm 之前 进行残差连接
+        """
         super().__init__()
         self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
         self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
@@ -216,18 +276,25 @@ class TransformerDecoderLayer(nn.Module):
                      memory_key_padding_mask: Optional[Tensor] = None,
                      pos: Optional[Tensor] = None,
                      query_pos: Optional[Tensor] = None):
+        # Positional Encoding
         q = k = self.with_pos_embed(tgt, query_pos)
+        # Multi-Head Self Attention
         tgt2 = self.self_attn(q, k, value=tgt, attn_mask=tgt_mask,
                               key_padding_mask=tgt_key_padding_mask)[0]
+        # Add & Norm
         tgt = tgt + self.dropout1(tgt2)
         tgt = self.norm1(tgt)
+        # Multi-Head Attention
         tgt2 = self.multihead_attn(query=self.with_pos_embed(tgt, query_pos),
                                    key=self.with_pos_embed(memory, pos),
                                    value=memory, attn_mask=memory_mask,
                                    key_padding_mask=memory_key_padding_mask)[0]
+        # Add & Norm
         tgt = tgt + self.dropout2(tgt2)
         tgt = self.norm2(tgt)
+        # Feed Forward
         tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
+        # Add & Norm
         tgt = tgt + self.dropout3(tgt2)
         tgt = self.norm3(tgt)
         return tgt
@@ -239,19 +306,27 @@ class TransformerDecoderLayer(nn.Module):
                     memory_key_padding_mask: Optional[Tensor] = None,
                     pos: Optional[Tensor] = None,
                     query_pos: Optional[Tensor] = None):
+        # Norm
         tgt2 = self.norm1(tgt)
+        # Positional Encoding
         q = k = self.with_pos_embed(tgt2, query_pos)
+        # Multi-Head Self Attention
         tgt2 = self.self_attn(q, k, value=tgt2, attn_mask=tgt_mask,
                               key_padding_mask=tgt_key_padding_mask)[0]
+        # Add & Norm
         tgt = tgt + self.dropout1(tgt2)
         tgt2 = self.norm2(tgt)
+        # Multi-Head Attention
         tgt2 = self.multihead_attn(query=self.with_pos_embed(tgt2, query_pos),
                                    key=self.with_pos_embed(memory, pos),
                                    value=memory, attn_mask=memory_mask,
                                    key_padding_mask=memory_key_padding_mask)[0]
+        # Add & Norm
         tgt = tgt + self.dropout2(tgt2)
         tgt2 = self.norm3(tgt)
+        # Feed Forward
         tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt2))))
+        # Add
         tgt = tgt + self.dropout3(tgt2)
         return tgt
 
