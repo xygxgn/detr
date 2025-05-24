@@ -77,8 +77,10 @@ class Transformer(nn.Module):
         # NxHxW to NxHW
         mask = mask.flatten(1)
 
-        # 2. 将转化好的数据传入编码-解码器 TODO read
+        # 2. 将转化好的数据传入编码-解码器
+        # 解码器中所有的 object queries, 即解码器的输入 query, 默认初始化为 0, 具体数值需要后续学习获得
         tgt = torch.zeros_like(query_embed)
+        # memory 为编码器的输出, 用于后续解码器在第二个多头注意力层生成 key 和 value
         memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed)
         hs = self.decoder(tgt, memory, memory_key_padding_mask=mask,
                           pos=pos_embed, query_pos=query_embed)
@@ -279,12 +281,14 @@ class TransformerDecoderLayer(nn.Module):
         # Positional Encoding
         q = k = self.with_pos_embed(tgt, query_pos)
         # Multi-Head Self Attention
+        # 注意这里 self_attn 对应的 nn.MultiheadAttention 内部会对 q, k, value 进行线性变换
         tgt2 = self.self_attn(q, k, value=tgt, attn_mask=tgt_mask,
                               key_padding_mask=tgt_key_padding_mask)[0]
         # Add & Norm
         tgt = tgt + self.dropout1(tgt2)
         tgt = self.norm1(tgt)
         # Multi-Head Attention
+        # 注意这里 multihead_attn 对应的 nn.MultiheadAttention 内部会对 query, key, value 进行线性变换
         tgt2 = self.multihead_attn(query=self.with_pos_embed(tgt, query_pos),
                                    key=self.with_pos_embed(memory, pos),
                                    value=memory, attn_mask=memory_mask,
@@ -311,12 +315,14 @@ class TransformerDecoderLayer(nn.Module):
         # Positional Encoding
         q = k = self.with_pos_embed(tgt2, query_pos)
         # Multi-Head Self Attention
+        # 注意这里 self_attn 对应的 nn.MultiheadAttention 内部会对 q, k, value 进行线性变换
         tgt2 = self.self_attn(q, k, value=tgt2, attn_mask=tgt_mask,
                               key_padding_mask=tgt_key_padding_mask)[0]
         # Add & Norm
         tgt = tgt + self.dropout1(tgt2)
         tgt2 = self.norm2(tgt)
         # Multi-Head Attention
+        # 注意这里 multihead_attn 对应的 nn.MultiheadAttention 内部会对 query, key, value 进行线性变换
         tgt2 = self.multihead_attn(query=self.with_pos_embed(tgt2, query_pos),
                                    key=self.with_pos_embed(memory, pos),
                                    value=memory, attn_mask=memory_mask,

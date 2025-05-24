@@ -71,6 +71,7 @@ class BackboneBase(nn.Module):
             # 若 train_backbone==False 冻结所有参数, 若 train_backbone=True, 仅训练 layer2、layer3、layer4 的参数
             if not train_backbone or 'layer2' not in name and 'layer3' not in name and 'layer4' not in name:
                 parameter.requires_grad_(False)
+        # 注意, 这里必须拿取 layer4 的输出, 而不能拿取 resnet 最后 avgpool 和 fc 层的结果
         if return_interm_layers:
             return_layers = {"layer1": "0", "layer2": "1", "layer3": "2", "layer4": "3"}
         else:

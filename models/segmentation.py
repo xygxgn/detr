@@ -41,9 +41,13 @@ class DETRsegm(nn.Module):
 
         bs = features[-1].tensors.shape[0]
 
+        # 获取 resnet 的 layer4 层的图像特征结果
         src, mask = features[-1].decompose()
         assert mask is not None
+        # 将图像特征维度降维到与transformer所需要的输入向量维度 [N, C, H, W], 即 C ==> d_model
+        # 注意, 这里特征图中每个格子对应一个d_model的向量, 代表了对应原图的一个区域, 格子 <==> 词, 特征图 <==> 句子
         src_proj = self.detr.input_proj(src)
+        # 注意 self.detr.query_embed.weight 隐式地编码了位置信息, 可以直接作为位置编码输入 [num_queries, hidden_dim]
         hs, memory = self.detr.transformer(src_proj, mask, self.detr.query_embed.weight, pos[-1])
 
         outputs_class = self.detr.class_embed(hs)

@@ -37,7 +37,7 @@ class DETR(nn.Module):
         self.class_embed = nn.Linear(hidden_dim, num_classes + 1)
         self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
         self.query_embed = nn.Embedding(num_queries, hidden_dim)
-        self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1)
+        self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1) # 将图像特征维度降维到与transformer所需要的输入向量维度
         self.backbone = backbone
         self.aux_loss = aux_loss
 
